@@ -1,0 +1,4 @@
+# The Docker build context is the project root, but only dashboard/ is needed.
+**
+!dashboard
+!dashboard/**

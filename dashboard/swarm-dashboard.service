@@ -1,0 +1,44 @@
+[Unit]
+Description=Swarm Live Dashboard
+Documentation=file:/opt/freellm-swarm/dashboard/README.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+
+WorkingDirectory=/opt/freellm-swarm
+ExecStart=/usr/bin/python3 -m dashboard.server
+
+# Override these in a drop-in (e.g. /etc/systemd/system/swarm-dashboard.service.d/)
+# or via /etc/default/swarm-dashboard as needed.
+Environment=HOST=0.0.0.0
+Environment=PORT=8787
+Environment=SWARM_DIR=/data/swarm
+Environment=DASHBOARD_TOKEN=
+EnvironmentFile=-/etc/default/swarm-dashboard
+
+# The swarm directory is read-only for the dashboard.
+ReadOnlyPaths=/data/swarm
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

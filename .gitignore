@@ -1,0 +1,8 @@
+.swarm/
+__pycache__/
+*.pyc
+.claude/
+demo/
+reviews/
+specs/
+.env
