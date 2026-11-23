@@ -229,6 +229,17 @@ def replay(run_dir: Path) -> Dict[str, Any]:
         task_id = ev.get('task')
         ts = ev.get('ts')
 
+        # Tasks added after run_start (e.g. reviewers, QA, auditors from team.py)
+        if (task_id and ev_type in ('task_queued', 'task_start') and task_id not in task_states
+                and validate_id(task_id)):
+            task_states[task_id] = {
+                'id': task_id, 'title': ev.get('title', task_id), 'status': 'queued', 'model': None,
+                'attempts': [], 'chars': 0, 'seconds': 0, 'prompt_tokens': 0, 'completion_tokens': 0,
+                'tokens': 0, 'revision': 0, 'files': [], 'notes': '', 'errors': [], 'verdict': None,
+                'verdict_text': '', 'applied': False, 'supervisor_notes': [], 'feedback': [],
+                'started': None, 'finished': None,
+            }
+
         if ev_type == 'run_start':
             run_started = ts
             # Add any tasks from run_start not in spec

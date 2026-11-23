@@ -37,7 +37,7 @@ A parallel AI software development system: a **supervisor** (Claude Code) splits
                     ┌──────────────────┐
                     │  Dashboard       │
                     │  (read-only)     │
-                    │  :8787           │
+                    │ 192.168.10.123   │
                     └──────────────────┘
 ```
 
@@ -58,51 +58,47 @@ A parallel AI software development system: a **supervisor** (Claude Code) splits
 ## Quick Start
 
 ```bash
-# 1. Configure FreeLLM API
-export FREELLMAPI_URL="https://your-freellm-api.example.com"
-export FREELLMAPI_KEY="sk-..."   # or put key in ~/.config/freellmapi/key
+# 1. FreeLLM API (defaults to the LAN router at http://192.168.10.122:3001)
+export FREELLMAPI_KEY="sk-..."   # or put the key in ~/.config/freellmapi/key
 
-# 2. Write a tasks.json (see format below)
-cat > tasks.json <<'EOF'
-{
-  "project": "hello-world",
-  "tasks": [
-    { "id": "write-main", "prompt": "Write a Python CLI that prints 'Hello, Swarm!'" },
-    { "id": "write-test", "prompt": "Write a pytest for the CLI", "depends_on": ["write-main"] }
-  ]
-}
-EOF
+# 2. Write a tasks.json (see format below), then run it
+python swarm.py run tasks.json
 
-# 3. Run the swarm
-python swarm.py tasks.json
-
-# 4. (Optional) Watch live in another terminal
-SWARM_DIR=.swarm python -m dashboard.server
-# Open http://localhost:8787/
+# 3. Watch it live on the dashboard server
+#    http://192.168.10.123:8787/?token=<DASHBOARD_TOKEN>
 ```
+
+Every command that changes a run (`run`, `revise`, `revise-many`, `note`, `verdict`, `apply`) pushes that run folder to the dashboard server with rsync over SSH, every few seconds while workers stream. If the push fails, the run carries on locally and `swarm.py sync` retries it.
 
 ---
 
 ## `swarm.py` Command Reference
 
-```bash
-python swarm.py <tasks.json> [options]
+```text
+swarm.py [--no-sync] models [--all]                  models the router can serve now
+swarm.py [--no-sync] run tasks.json [-j N] [--pool a,b,c] [--per-model N] [--only id ...]
+swarm.py [--no-sync] revise <run> <task> "feedback" [--model M]
+swarm.py [--no-sync] revise-many <run> feedback.json [-j N]   # {"task": "feedback", ...}
+swarm.py [--no-sync] note <run> [task] "text"
+swarm.py [--no-sync] verdict <run> <task> approved|rejected ["why"]
+swarm.py status <run>
+swarm.py [--no-sync] apply <run> <task> [--dest DIR]
+swarm.py sync [run]                                  push one run (or all) to the dashboard
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--run-dir DIR` | Override `.swarm/<timestamp>` run directory |
-| `--max-parallel N` | Max concurrent workers (default: 4) |
-| `--model MODEL` | Override model for all tasks |
-| `--temperature FLOAT` | Sampling temperature (default: 0.2) |
-| `--max-tokens N` | Max tokens per completion (default: 4096) |
-| `--timeout SECS` | HTTP timeout per request (default: 120) |
-| `--no-stream` | Disable streaming, wait for full response |
-| `-v, --verbose` | Verbose logging to stderr |
+**Parallelism.** Tasks are spread over a pool of models, at most `--per-model` (default 2) at a time on each, with up to `-j` (default 8) tasks at once. The pool is `--pool`, else the file's `model` + `model_pool` (or the built-in `DEFAULT_POOL`) + `fallback_models`, filtered to models the router reports as usable. A model that answers 429 rests (60 s, doubling up to 10 min) while its task moves to the next free model; a model that errors or returns no `<file>` blocks is dropped for that task. Tasks with `depends_on` start the moment those finish, and see their staged files and notes.
 
-**Environment variables** (read by `swarm.py`):
-- `FREELLMAPI_URL` — **required**, base URL of FreeLLM API (e.g. `https://api.example.com`)
-- `FREELLMAPI_KEY` — API key, or use `~/.config/freellmapi/key`
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FREELLMAPI_URL` | `http://192.168.10.122:3001` | FreeLLM API router |
+| `FREELLMAPI_KEY` | `~/.config/freellmapi/key` | API key |
+| `SWARM_DIR` | `.swarm` | Local run data |
+| `SWARM_DASHBOARD_URL` | `http://192.168.10.123:8787/` | Dashboard link printed by `run` |
+| `SWARM_SYNC` | `swarmsync@192.168.10.123:` | rsync target (`off` disables) |
+| `SWARM_SYNC_SSH` | `ssh` | SSH command for rsync, e.g. `ssh -i ~/.ssh/id_ed25519` |
+| `SWARM_COOLDOWN` | `60` | First rest after a 429, in seconds |
 
 ---
 
@@ -110,31 +106,36 @@ python swarm.py <tasks.json> [options]
 
 ```json
 {
-  "project": "my-project",
-  "model": "default-model-name",           // optional, per-task override allowed
-  "temperature": 0.2,                       // optional
-  "max_tokens": 4096,                       // optional
+  "name": "Human readable run name",
+  "project": "path/to/project",
+  "model": "nemotron-3-ultra-550b",
+  "model_pool": ["nemotron-3-ultra-550b", "kilo-auto", "gpt-oss-120b"],
+  "fallback_models": ["auto"],
+  "shared_context": "Stack, conventions and interfaces every worker must follow",
   "tasks": [
     {
-      "id": "unique-task-id",               // required, ^[A-Za-z0-9_.-]+$
-      "prompt": "Task instruction...",      // required
-      "depends_on": ["other-task-id"],      // optional, DAG dependencies
-      "model": "task-specific-model",       // optional override
-      "temperature": 0.5,                   // optional override
-      "max_tokens": 2048                    // optional override
+      "id": "api",
+      "title": "Short label",
+      "instructions": "What to build",
+      "owns": ["src/api/**"],
+      "context_files": ["src/types.ts"],
+      "depends_on": ["types"],
+      "model": "optional: pin this task to one model first"
     }
   ]
 }
 ```
 
-- Tasks run in parallel respecting `depends_on` (topological order).
-- Each task gets a directory `.swarm/<run>/tasks/<id>/` containing:
-  - `live.md` — streaming worker output (updated in real time)
-  - Staged files written by `apply` (relative paths preserved)
+- Each task stages its output in `.swarm/<run>/<task>/`: `live.md` (streaming output), `response.md`, `result.json` and `files/` (only paths matching `owns`).
+- Keep tasks independent where you can: that's what lets them all run at once. Use `depends_on` only when a task really needs another's files.
 
 ---
 
-## Dashboard — Local Run
+## Dashboard server
+
+The dashboard runs on CT 123 at **http://192.168.10.123:8787/** (LAN and VPN only), reading `/data/swarm`, which `swarm.py` fills over rsync as the `swarmsync` user.
+
+### Running a dashboard locally
 
 ```bash
 # From project root
